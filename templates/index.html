@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>보이스피싱 방지 챗봇</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto max-w-4xl p-4">
+        <header class="bg-blue-600 text-white rounded-t-lg p-4 shadow-md">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-shield-alt text-2xl"></i>
+                    <h1 class="text-xl font-bold">보이스피싱 방지 챗봇</h1>
+                </div>
+                <div class="text-sm bg-blue-700 px-3 py-1 rounded-full">
+                    <i class="fas fa-circle text-xs mr-1"></i>
+                    <span>실시간 상담 중</span>
+                </div>
+            </div>
+            <p class="text-sm mt-2 opacity-90">의심되는 통화나 메시지를 업로드하면 AI가 분석해드립니다.</p>
+        </header>
+
+        <div class="bg-white rounded-b-lg shadow-lg overflow-hidden">
+            <!-- Chat Area -->
+            <div id="chat-area" class="chat-container p-4 overflow-y-auto space-y-4">
+                <!-- AI Welcome Message -->
+                <div class="flex items-start space-x-3">
+                    <div class="bg-blue-100 text-blue-800 rounded-full w-10 h-10 flex items-center justify-center">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <div class="max-w-xs md:max-w-md lg:max-w-lg bg-blue-50 rounded-xl p-3">
+                        <p class="font-medium text-blue-800">보이스피싱 방지 AI</p>
+                        <p class="text-gray-700 mt-1">안녕하세요! 보이스피싱 방지를 도와드리는 AI 챗봇입니다. 의심되는 통화 내용, 문자 메시지, 동영상 또는 음성 파일을 업로드하시면 분석해드립니다.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- File Upload Options -->
+            <div id="file-upload-options" class="border-t border-gray-200 p-4 bg-gray-50 hidden">
+                <div class="flex justify-center space-x-4">
+                    <label for="media-upload" class="file-upload-label cursor-pointer bg-white rounded-lg p-4 text-center border border-gray-300 w-1/2">
+                        <i class="fas fa-image text-blue-500 text-2xl mb-2"></i>
+                        <p class="font-medium text-gray-700">동영상/이미지 업로드</p>
+                        <p class="text-xs text-gray-500 mt-1">의심되는 동영상이나 이미지 파일</p>
+                        <input id="media-upload" type="file" accept="image/*, video/*" class="hidden">
+                    </label>
+                    <label for="audio-upload" class="file-upload-label cursor-pointer bg-white rounded-lg p-4 text-center border border-gray-300 w-1/2">
+                        <i class="fas fa-microphone text-green-500 text-2xl mb-2"></i>
+                        <p class="font-medium text-gray-700">음성 파일 업로드</p>
+                        <p class="text-xs text-gray-500 mt-1">녹음된 통화 내용이나 음성 메시지</p>
+                        <input id="audio-upload" type="file" accept="audio/*" class="hidden">
+                    </label>
+                </div>
+                <button id="close-upload" class="mt-4 w-full py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition">
+                    <i class="fas fa-times mr-2"></i>닫기
+                </button>
+            </div>
+
+            <!-- Input Area -->
+            <div class="border-t border-gray-200 p-4 bg-white">
+                <div id="typing-indicator" class="text-sm text-gray-500 mb-2 hidden">
+                    <div class="typing-indicator">
+                        <span class="mr-2">AI가 답변을 작성 중입니다</span>
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                    </div>
+                </div>
+                <div class="flex space-x-2">
+                    <button id="upload-btn" class="bg-gray-200 text-gray-700 rounded-lg p-3 hover:bg-gray-300 transition">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <input id="user-input" type="text" placeholder="메시지를 입력하세요..." 
+                           class="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button id="send-btn" class="bg-blue-600 text-white rounded-lg p-3 hover:bg-blue-700 transition">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+                <p class="text-xs text-gray-500 mt-2 text-center">
+                    <i class="fas fa-lock mr-1"></i>모든 대화 내용은 안전하게 보호되며, 분석 목적으로만 사용됩니다.
+                </p>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
