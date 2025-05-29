@@ -1,0 +1,8 @@
+Flask>=2.3
+python-dotenv>=0.20
+requests>=2.28
+opencv-python>=4.6
+dlib>=19.22
+Pillow>=9.0
+numpy>=1.22
+Flask-CORS>=3.0
