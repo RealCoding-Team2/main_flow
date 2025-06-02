@@ -1,9 +1,12 @@
 # ❓ 서버 실행 방법
 - `.env`파일 생성
   - 루트 디렉토리에 위치
-  - ```
-    # 파일 예시
-    GEMINI_API_URL=<제미나이 API 키>
+  - `.env.example` 파일을 복사하여 `.env`로 이름 변경 후 실제 값 입력
+  - ```bash
+    # OpenAI API 설정
+    OPENAI_API_KEY=your_openai_api_key_here
+    OPENAI_BASE_URL=https://api.openai.com/v1
+    DEFAULT_MODEL=gpt-4.1-mini
     ```
 - 파이썬 버전: 3.13
 - 패키지 설치: `pip install -r requirements.txt`
@@ -30,6 +33,10 @@
 - `run.py`: 
   - `python run.py`를 입력할 시 서버가 동작되도록 합니다
   - 설정된 라우터는 `/app/__init__.py`를 참고하세요
+- `llm.py`:
+  - OpenAI API를 활용한 LLM 통신 모듈
+  - python-dotenv를 사용하여 환경변수 자동 로드
+  - 대화 히스토리 관리 및 설정 가능한 파라미터
 - `/app`: 핵심코드는 전부 여기에 있습니다
 
 ---
