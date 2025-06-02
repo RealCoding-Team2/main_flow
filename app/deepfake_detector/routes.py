@@ -1,4 +1,4 @@
-# phishing_detection_project/main_flow/app/deepfake_detector/routes.py
+
 from flask import request, jsonify, current_app
 from . import bp
 from .services import extract_single_frame_features, get_llm_deepfake_judgment
