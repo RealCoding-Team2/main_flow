@@ -34,3 +34,20 @@
     0%, 60%, 100% { transform: translateY(0); }
     30% { transform: translateY(-5px); }
 }
+
+/* styles.css 에 추가 */
+.message-ai.alert .message-content { /* AI 메시지이면서 alert 클래스가 있을 때 */
+    background-color: #fee2e2; /* 연한 빨간색 배경 */
+    border-left: 4px solid #ef4444; /* 빨간색 왼쪽 테두리 */
+}
+.message-ai.alert .message-title { /* 경고 메시지의 제목 */
+    color: #b91c1c; /* 진한 빨간색 글자 */
+    font-weight: bold;
+}
+.message-ai.alert .message-text { /* 경고 메시지의 본문 */
+    color: #374151; 
+}
+
+.whitespace-pre-wrap {
+  white-space: pre-wrap; 
+}
