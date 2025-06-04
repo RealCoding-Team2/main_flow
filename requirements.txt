@@ -6,3 +6,4 @@ dlib>=19.22
 Pillow>=9.0
 numpy>=1.22
 Flask-CORS>=3.0
+openai>=1.9.1
