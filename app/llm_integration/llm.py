@@ -111,7 +111,7 @@ class LLMRequester:
             "api_key_set": bool(self.api_key),
             "base_url": self.base_url,
             "model": self.model,
-            "max_tokens": int(os.getenv("MAX_TOKENS", 1000)),
+            "max_tokens": int(os.getenv("MAX_TOKENS", 300000)),
             "temperature": float(os.getenv("TEMPERATURE", 0.7)),
         }
 
