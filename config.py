@@ -9,25 +9,12 @@ else:
     print(f"경고: .env 파일을 찾을 수 없습니다. 경로: {dotenv_path}. 환경 변수가 직접 설정되었는지 확인하세요.")
 
 class Config: 
-     SECRET_KEY = os.environ.get('SECRET_KEY') or '개발용-임시-시크릿-키-입니다-반드시-변경하세요'
-     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-   
-    # GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-    
-    # GEMINI_MODEL_NAME   = "gemini-1.5-flash-latest"
-    # GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+    OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
-     DLIB_LANDMARK_MODEL_PATH = None
+    DLIB_LANDMARK_MODEL_PATH = None
 
-    # @staticmethod
-    # def get_gemini_api_url():
-    #     if not Config.GEMINI_API_KEY or not Config.GEMINI_MODEL_NAME:
-    #         return None
-        
-    #     return f"{Config.GEMINI_API_URL_BASE}/{Config.GEMINI_MODEL_NAME}:generateContent?key={Config.GEMINI_API_KEY}"
-
-     @staticmethod  
-     def init_app(app): 
+    @staticmethod  
+    def init_app(app): 
         project_root = os.path.dirname(os.path.abspath(__file__))
         app.config['DLIB_LANDMARK_MODEL_PATH'] = os.path.join(project_root, 'app', 'models', 'shape_predictor_68_face_landmarks.dat')
         
