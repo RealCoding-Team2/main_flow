@@ -1,11 +1,11 @@
 document.addEventListener('DOMContentLoaded', function() {
-    const chatArea = document.getElementById('chat-area');
+    const chatArea  = document.getElementById('chat-area');
     const userInput = document.getElementById('user-input');
-    const sendBtn = document.getElementById('send-btn');
+    const sendBtn   = document.getElementById('send-btn');
     const uploadBtn = document.getElementById('upload-btn');
     const fileUploadOptions = document.getElementById('file-upload-options');
-    const closeUploadBtn = document.getElementById('close-upload');
-    const typingIndicator = document.getElementById('typing-indicator');
+    const closeUploadBtn    = document.getElementById('close-upload');
+    const typingIndicator   = document.getElementById('typing-indicator');
     let conversationHistory = []; // 대화 기록 (필요시 LLM에 전달)
 
     // 채팅 스크롤 항상 하단 유지
@@ -54,9 +54,9 @@ document.addEventListener('DOMContentLoaded', function() {
                                 .replace(/\n/g, '<br>')
                                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
 
-        const alertBgClass = isAlert ? 'bg-red-50 border-l-4 border-red-500' : 'bg-blue-50';
+        const alertBgClass    = isAlert ? 'bg-red-50 border-l-4 border-red-500' : 'bg-blue-50';
         const titleColorClass = isAlert ? 'text-red-800 font-bold' : 'text-blue-800 font-medium';
-        const iconBgClass = isAlert ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800';
+        const iconBgClass     = isAlert ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800';
 
 
         const messageElement = `
@@ -72,6 +72,44 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         chatArea.insertAdjacentHTML('beforeend', messageElement);
         scrollToBottom();
+    }
+
+    // AI 메시지 중 이미지를 채팅창에 추가하는 함수
+    function addAiMessage_img(imageSrc, boundingBox = null) {
+        const canvasId = `canvas-${Date.now()}`;  // 고유 ID 부여
+
+        const canvasContainer = document.createElement('div');
+        canvasContainer.className = 'flex items-start space-x-3 my-2';
+        canvasContainer.innerHTML = `
+            <div class="bg-blue-100 text-blue-800 rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="max-w-xs md:max-w-md lg:max-w-lg bg-blue-50 rounded-xl p-3 shadow">
+                <p class="font-medium text-blue-800">보이스피싱 방지 AI</p>
+                <canvas id="${canvasId}" class="mt-2 rounded-lg shadow-md max-w-full" style="width:100%; height:auto;"></canvas>
+            </div>
+        `;
+        chatArea.appendChild(canvasContainer);
+
+        const canvas = canvasContainer.querySelector('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+
+        img.onload = () => {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+
+            // 만약, 서버로부터 박스좌표값을 받았다면 네모를 그림
+            if (boundingBox) {
+                const { x, y, w, h } = boundingBox;
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(x, y, w, h);
+            }
+            scrollToBottom();
+        };
+        img.src = imageSrc;
     }
 
     // 일반 텍스트 메시지 전송 처리 함수
@@ -137,6 +175,9 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 typingIndicator.classList.add('hidden');
                 console.log('전체 서버 응답 (data):', JSON.stringify(data, null, 2)); // 디버깅용 로그
+
+                // 서버에서 응답이 왔다면, 이미지를 다시 띄우고, 좌표값이 있다면 그 좌표값대로 네모를 그립니다.
+                addAiMessage_img(URL.createObjectURL(file), data.feature_analysis?.bounding_box);
 
                 // --- 중요: 이제 data.llm_judgment는 이미 JSON 객체이므로 바로 사용합니다. ---
                 if (data.llm_judgment) {
