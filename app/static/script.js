@@ -123,7 +123,7 @@ document.addEventListener('DOMContentLoaded', function() {
         scrollToBottom();
 
         try {
-            const response = await fetch('/chat', { // Flask의 /chat 라우트 호출
+            const response = await fetch('/api/chat', { // Flask의 /chat 라우트 호출
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: message })

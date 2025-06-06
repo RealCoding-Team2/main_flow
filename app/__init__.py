@@ -64,6 +64,12 @@ def create_app(config_class=Config):
     app.register_blueprint(deepfake_bp, url_prefix='/api/deepfake') 
     app.logger.info("Deepfake detector 블루프린트가 '/api/deepfake' 경로로 등록되었습니다.")
 
+    # 일반 채팅을 위한 블루프린트 등록
+    from .chat import bp as chat_bp
+    
+    app.register_blueprint(chat_bp, url_prefix='/api/chat') 
+    app.logger.info("Chat 블루프린트가 '/api/chat' 경로로 등록되었습니다.")
+
     # 서버 상태 확인용 간단한 경로
     @app.route('/health')
     def health_check():

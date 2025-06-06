@@ -20,7 +20,7 @@ def index():
 
 if __name__ == '__main__':
     server_port = int(os.environ.get('PORT', 5001))
-    is_debug_mode = application.config.get('FLASK_DEBUG', False)
+    is_debug_mode = application.config.get('FLASK_DEBUG', True)
     
     application.logger.info(f"Flask 애플리케이션을 http://0.0.0.0:{server_port} 에서 시작합니다 (디버그 모드: {is_debug_mode}).")
     
