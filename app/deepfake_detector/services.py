@@ -136,7 +136,7 @@ def extract_single_frame_features(image_bytes):
 # 추출된 특징들(여러 프레임 또는 단일 이미지)과 사용자 상황 설명을 바탕으로 LLM에게 최종 판단 요청
 def get_llm_deepfake_judgment(analysis_input_data, situation_description="", input_type="image"):
     try:
-        llm_model_to_use = os.getenv("DEFAULT_MODEL") or "gpt-3.5-turbo" # .env 또는 기본값
+        llm_model_to_use = os.getenv("DEFAULT_MODEL") # .env 또는 기본값
         llm_requester = LLMRequester(model=llm_model_to_use) # 여기서 API 키 없으면 ValueError 발생
         current_app.logger.info(f"OpenAI LLM ({llm_model_to_use}) 객체 생성 완료.")
     except ValueError as ve: # LLMRequester가 API 키 없으면 ValueError 발생시킴
@@ -236,21 +236,20 @@ def call_fast_stt_api(audio_file_path):
         dict: STT 결과 또는 에러 정보
     """
     try:
-        # fast-stt 서비스 URL (환경변수에서 가져오거나 기본값 사용)
-        stt_service_url = os.getenv('FAST_STT_SERVICE_URL', 'http://localhost:8001')
-        stt_endpoint = f"{stt_service_url}/api/transcribe"
+        stt_service_url = os.getenv('FAST_STT_SERVICE_URL', 'http://localhost:8000')
+        stt_endpoint = f"{stt_service_url}/transcribe"
         
         current_app.logger.info(f"fast-stt 서비스 호출 시작: {stt_endpoint}")
         
-        # 음성 파일을 multipart/form-data로 전송
+        # 음성 파일을 multipart/form-data로 전송 (fast-stt API 규격에 맞게 'file' 키 사용)
         with open(audio_file_path, 'rb') as audio_file:
-            files = {'audio': (Path(audio_file_path).name, audio_file, 'audio/mpeg')}
+            files = {'file': (Path(audio_file_path).name, audio_file, 'audio/mpeg')}
             
             # POST 요청으로 STT 서비스 호출
             response = requests.post(
                 stt_endpoint,
                 files=files,
-                timeout=60  # 60초 타임아웃
+                timeout=600  # 10분 타임아웃 (긴 음성 파일 처리 고려)
             )
         
         if response.status_code == 200:
@@ -288,6 +287,96 @@ def call_fast_stt_api(audio_file_path):
             "error": f"STT 서비스 호출 중 오류: {str(e)}"
         }
 
+def summarize_text_for_analysis(text, max_length=1000):
+    """
+    긴 텍스트를 LLM을 통해 요약하여 핵심 내용만 추출합니다.
+    
+    Args:
+        text (str): 요약할 원본 텍스트
+        max_length (int): 원본 텍스트 길이 기준 (이보다 짧으면 요약하지 않음)
+        
+    Returns:
+        dict: 요약 결과 또는 원본 텍스트
+    """
+    if len(text.strip()) <= max_length:
+        current_app.logger.info(f"텍스트 길이가 {len(text)}자로 짧아 요약을 생략합니다.")
+        return {
+            "original_text": text,
+            "summarized_text": text,
+            "is_summarized": False,
+            "summary_reason": "텍스트가 충분히 짧음"
+        }
+    
+    try:
+        llm_model_to_use = os.getenv("DEFAULT_MODEL")
+        llm_requester = LLMRequester(model=llm_model_to_use)
+        current_app.logger.info(f"텍스트 요약을 위한 LLM ({llm_model_to_use}) 객체 생성 완료.")
+    except ValueError as ve:
+        current_app.logger.error(f"텍스트 요약 LLM 초기화 오류: {ve}")
+
+        return {
+            "original_text": text,
+            "summarized_text": text,
+            "is_summarized": False,
+            "summary_reason": f"LLM 초기화 실패: {str(ve)}"
+        }
+    except Exception as e:
+        current_app.logger.error(f"텍스트 요약 LLM 초기화 중 예상치 못한 오류: {e}", exc_info=True)
+        return {
+            "original_text": text,
+            "summarized_text": text,
+            "is_summarized": False,
+            "summary_reason": f"서버 오류: {str(e)}"
+        }
+
+    system_prompt = """당신은 통화 내용 요약 전문가입니다.
+제공된 통화 텍스트를 분석하여 보이스피싱 탐지에 필요한 핵심 정보만을 추출해 요약해주세요.
+
+다음 요소들을 중점적으로 포함해서 요약하세요:
+1. 상대방이 자신을 누구라고 소개했는지 (신분, 소속)
+2. 금융 관련 언급 사항 (계좌, 카드, 대출, 송금, 보험금 등)
+3. 긴급성을 강조하는 표현들
+4. 개인정보 요구 사항
+5. 위협적이거나 강압적인 언어
+6. 특정 행동을 요구하는 내용 (ATM 조작, 앱 설치, 계좌 이체 등)
+7. 통화자의 목적과 의도
+
+요약은 간결하면서도 보이스피싱 판단에 필요한 모든 정보를 포함해야 합니다.
+원본 텍스트의 중요한 맥락과 뉘앙스를 유지해주세요."""
+
+    user_message = f"""
+다음 통화 내용을 보이스피싱 탐지 분석에 적합하도록 요약해주세요:
+
+[원본 통화 내용]
+{text}
+
+위 내용을 핵심 정보만 추출하여 요약해주세요.
+"""
+
+    try:
+        summary_response = llm_requester.send_message(
+            message=user_message,
+            system_prompt=system_prompt
+        )
+        current_app.logger.info("텍스트 요약 완료")
+        
+        return {
+            "original_text": text,
+            "summarized_text": summary_response.strip(),
+            "is_summarized": True,
+            "summary_reason": f"원본 길이 {len(text)}자에서 {len(summary_response)}자로 요약"
+        }
+
+    except Exception as e:
+        current_app.logger.error(f"텍스트 요약 중 오류: {e}", exc_info=True)
+
+        return {
+            "original_text": text,
+            "summarized_text": text,
+            "is_summarized": False,
+            "summary_reason": f"요약 실패: {str(e)}"
+        }
+
 def analyze_text_for_voicephishing(text, situation=""):
     """
     텍스트 내용을 분석하여 보이스피싱 여부를 판단합니다.
@@ -300,7 +389,7 @@ def analyze_text_for_voicephishing(text, situation=""):
         dict: 보이스피싱 분석 결과
     """
     try:
-        llm_model_to_use = os.getenv("DEFAULT_MODEL") or "gpt-3.5-turbo"
+        llm_model_to_use = os.getenv("DEFAULT_MODEL")
         llm_requester = LLMRequester(model=llm_model_to_use)
         current_app.logger.info(f"보이스피싱 분석을 위한 LLM ({llm_model_to_use}) 객체 생성 완료.")
     except ValueError as ve:
@@ -329,15 +418,21 @@ def analyze_text_for_voicephishing(text, situation=""):
 5. 위협적 언어 ("체포", "압류", "수사", "법적 조치")
 6. 의심스러운 요구 (ATM 조작, 앱 설치, 화면 공유)
 
-응답은 반드시 다음 JSON 형식을 따라주세요:
+**중요: 반드시 아래의 정확한 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.**
+
 {
-  "voicephishing_probability": "string (매우 높음/높음/중간/낮음/매우 낮음 중 하나)",
-  "confidence_score": "float (0.0-1.0 사이의 신뢰도)",
-  "reasoning": "string (구체적인 판단 근거)",
-  "detected_patterns": ["보이스피싱으로 의심되는 패턴들"],
-  "risk_level": "string (고위험/중위험/저위험/안전 중 하나)",
-  "recommendations_for_user": "string (사용자를 위한 구체적인 조치 방안)"
-}"""
+  "voicephishing_probability": "매우 높음",
+  "confidence_score": 0.85,
+  "reasoning": "구체적인 판단 근거",
+  "detected_patterns": ["패턴1", "패턴2"],
+  "risk_level": "고위험",
+  "recommendations_for_user": "구체적인 조치 방안"
+}
+
+가능한 값들:
+- voicephishing_probability: "매우 높음", "높음", "중간", "낮음", "매우 낮음"
+- risk_level: "고위험", "중위험", "저위험", "안전"
+- confidence_score: 0.0~1.0 사이의 숫자"""
 
     user_message = f"""
 [분석할 텍스트]
@@ -354,29 +449,74 @@ def analyze_text_for_voicephishing(text, situation=""):
             message=user_message,
             system_prompt=system_prompt
         )
-        current_app.logger.debug(f"보이스피싱 분석 LLM 응답: {llm_response}")
+        
+        if isinstance(llm_response, str) and llm_response.startswith("오류가 발생했습니다:"):
+            current_app.logger.error(f"LLM API 호출 실패: {llm_response}")
+            return {
+                "voicephishing_probability": "판단 불가 (LLM API 오류)",
+                "confidence_score": 0.0,
+                "reasoning": f"LLM 서비스와 통신 중 오류가 발생했습니다: {llm_response}",
+                "detected_patterns": [],
+                "risk_level": "분석 실패",
+                "recommendations_for_user": "인터넷 연결을 확인하고 잠시 후 다시 시도해주세요."
+            }
 
-        # JSON 응답 파싱
-        if isinstance(llm_response, str):
-            analysis_result = json.loads(llm_response)
-        else:
-            analysis_result = llm_response
+        try:
+            if isinstance(llm_response, dict):
+                analysis_result = llm_response
+            elif isinstance(llm_response, str):
+                llm_response = llm_response.strip()
+                
+                if llm_response.startswith('```json') and llm_response.endswith('```'):
+                    llm_response = llm_response[7:-3].strip()
+                elif llm_response.startswith('```') and llm_response.endswith('```'):
+                    llm_response = llm_response[3:-3].strip()
+                
+                start_idx = llm_response.find('{')
+                end_idx = llm_response.rfind('}')
+                
+                if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
+                    json_str = llm_response[start_idx:end_idx+1]
+                    analysis_result = json.loads(json_str)
+                else:
+                    analysis_result = {
+                        "voicephishing_probability": "판단 불가 (응답 형식 오류)",
+                        "confidence_score": 0.0,
+                        "reasoning": f"LLM이 JSON 형식이 아닌 응답을 보냈습니다: {llm_response[:500]}",
+                        "detected_patterns": [],
+                        "risk_level": "분석 실패",
+                        "recommendations_for_user": "시스템 관리자에게 문의해주세요."
+                    }
+            else:
+                analysis_result = {
+                    "voicephishing_probability": "판단 불가 (응답 타입 오류)",
+                    "confidence_score": 0.0,
+                    "reasoning": f"LLM 응답 타입이 예상과 다릅니다: {type(llm_response)}",
+                    "detected_patterns": [],
+                    "risk_level": "분석 실패",
+                    "recommendations_for_user": "시스템 관리자에게 문의해주세요."
+                }
+                
+        except json.JSONDecodeError as je:
+            analysis_result = {
+                "voicephishing_probability": "판단 불가 (JSON 파싱 실패)",
+                "confidence_score": 0.0,
+                "reasoning": f"AI 응답을 JSON으로 파싱할 수 없습니다. 오류: {str(je)}",
+                "detected_patterns": [],
+                "risk_level": "분석 실패",
+                "recommendations_for_user": "다시 시도해주시거나 관리자에게 문의해주세요."
+            }
             
-        current_app.logger.info("보이스피싱 분석 완료")
         return analysis_result
 
-    except json.JSONDecodeError as je:
-        current_app.logger.error(f"LLM 응답 JSON 파싱 오류: {je}")
-        return {
-            "voicephishing_probability": "판단 불가 (응답 파싱 오류)",
-            "reasoning": "AI 응답을 처리하는 중 오류가 발생했습니다.",
-            "recommendations_for_user": "다시 시도해주시거나 관리자에게 문의해주세요."
-        }
     except Exception as e:
         current_app.logger.error(f"보이스피싱 분석 중 오류: {e}", exc_info=True)
         return {
             "voicephishing_probability": "판단 불가 (서버 오류)",
+            "confidence_score": 0.0,
             "reasoning": f"분석 중 오류가 발생했습니다: {str(e)}",
+            "detected_patterns": [],
+            "risk_level": "분석 실패",
             "recommendations_for_user": "잠시 후 다시 시도해주세요."
         }
 
@@ -413,8 +553,32 @@ def analyze_audio_for_voicephishing(audio_file_path, situation=""):
             "recommendations_for_user": "더 명확한 음성이 포함된 파일을 업로드해주세요."
         }
     
-    # 2. 텍스트 내용 보이스피싱 분석
-    voicephishing_analysis = analyze_text_for_voicephishing(transcription, situation)
+    # 2. 텍스트 요약 (새로 추가된 단계)
+    current_app.logger.info("텍스트 요약 단계 시작")
+    summary_result = summarize_text_for_analysis(transcription)
+    
+    # STT 결과에 요약 정보 추가
+    stt_result["summary_info"] = {
+        "is_summarized": summary_result["is_summarized"],
+        "summary_reason": summary_result["summary_reason"],
+        "original_length": len(summary_result["original_text"]),
+        "summarized_length": len(summary_result["summarized_text"]),
+        "summarized_text": summary_result["summarized_text"]
+    }
+    
+    # 3. 요약된 텍스트로 보이스피싱 분석
+    text_to_analyze = summary_result["summarized_text"]
+    current_app.logger.info(f"보이스피싱 분석할 텍스트 길이: {len(text_to_analyze)}자")
+    
+    voicephishing_analysis = analyze_text_for_voicephishing(text_to_analyze, situation)
+    
+    # 분석 결과에 요약 정보 추가
+    if isinstance(voicephishing_analysis, dict):
+        voicephishing_analysis["text_processing"] = {
+            "was_summarized": summary_result["is_summarized"],
+            "original_text_length": len(transcription),
+            "analyzed_text_length": len(text_to_analyze)
+        }
     
     current_app.logger.info("음성 파일 보이스피싱 분석 완료")
     return stt_result, voicephishing_analysis

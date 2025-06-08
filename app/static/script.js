@@ -252,10 +252,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.stt_result && data.stt_result.success) {
                     const transcription = data.stt_result.transcription;
                     const confidence = data.stt_result.confidence;
+                    const summaryInfo = data.stt_result.summary_info;
                     
-                    let sttMessage = `**음성 변환 결과:**\n"${transcription}"\n`;
+                    // 요약된 텍스트가 있으면 그것을 사용, 없으면 원본 사용
+                    const displayText = summaryInfo && summaryInfo.summarized_text ? 
+                                      summaryInfo.summarized_text : transcription;
+                    
+                    let sttMessage = `**음성 변환 및 요약 결과:**\n"${displayText}"\n`;
                     if (confidence !== undefined) {
-                        sttMessage += `(변환 신뢰도: ${Math.round(confidence * 100)}%)\n\n`;
+                        sttMessage += `(변환 신뢰도: ${Math.round(confidence * 100)}%)\n`;
+                    }
+                    
+                    // 요약 정보 추가
+                    if (summaryInfo) {
+                        if (summaryInfo.is_summarized) {
+                            sttMessage += `\n**텍스트 처리:** 원본 ${summaryInfo.original_length}자에서 ${summaryInfo.summarized_length}자로 요약됨\n`;
+                        } else {
+                            sttMessage += `\n**텍스트 처리:** ${summaryInfo.summary_reason}\n`;
+                        }
                     }
                     
                     addAiMessage(sttMessage);
@@ -269,18 +283,26 @@ document.addEventListener('DOMContentLoaded', function() {
                     const confidence = data.llm_judgment.confidence_score;
                     const riskLevel = data.llm_judgment.risk_level;
                     const detectedPatterns = data.llm_judgment.detected_patterns;
+                    const textProcessing = data.llm_judgment.text_processing;
 
                     let resultMessage = `**보이스피싱 분석 결과: ${probability}**\n`;
                     if (riskLevel) {
                         resultMessage += `**위험도:** ${riskLevel}\n`;
                     }
                     if (confidence !== undefined) {
-                        resultMessage += `**분석 신뢰도:** ${Math.round(confidence * 100)}%\n\n`;
-                    } else {
-                        resultMessage += `\n`;
+                        resultMessage += `**분석 신뢰도:** ${Math.round(confidence * 100)}%\n`;
                     }
                     
-                    resultMessage += `**분석 근거:**\n${reasoning}\n\n`;
+                    // 텍스트 처리 정보 추가
+                    if (textProcessing) {
+                        if (textProcessing.was_summarized) {
+                            resultMessage += `**분석 방식:** 요약된 텍스트 기반 분석 (${textProcessing.original_text_length}자 → ${textProcessing.analyzed_text_length}자)\n`;
+                        } else {
+                            resultMessage += `**분석 방식:** 원본 텍스트 직접 분석\n`;
+                        }
+                    }
+                    
+                    resultMessage += `\n**분석 근거:**\n${reasoning}\n\n`;
                     
                     if (detectedPatterns && detectedPatterns.length > 0) {
                         resultMessage += `**감지된 의심 패턴:**\n`;

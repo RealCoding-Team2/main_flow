@@ -9,7 +9,7 @@
     DEFAULT_MODEL=gpt-4.1-mini
     
     # fast-stt 서비스 설정 (음성 파일 분석용)
-    FAST_STT_SERVICE_URL=http://localhost:8001
+    FAST_STT_SERVICE_URL=http://localhost:8000
     ```
 - 파이썬 버전: 3.13
 - 패키지 설치: `pip install -r requirements.txt`
@@ -20,7 +20,7 @@
   - 참고 사이트: https://sulastri.tistory.com/3
 - **fast-stt 서비스 설정** (음성 파일 분석 기능용):
   - [fast-stt 레포지토리](https://github.com/RealCoding-Team2/fast-stt/tree/dev) 클론 및 실행
-  - fast-stt 서비스가 포트 8001에서 실행되어야 함
+  - fast-stt 서비스가 포트 8000에서 실행되어야 함
   - 환경변수 `FAST_STT_SERVICE_URL`로 서비스 주소 설정 가능
 - 실행: `python run.py`
 

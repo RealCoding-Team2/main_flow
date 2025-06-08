@@ -14,7 +14,7 @@ class Config:
      DEFAULT_MODEL  = os.environ.get('DEFAULT_MODEL')
      
      # fast-stt 서비스 설정
-     FAST_STT_SERVICE_URL = os.environ.get('FAST_STT_SERVICE_URL') or 'http://localhost:8001'
+     FAST_STT_SERVICE_URL = os.environ.get('FAST_STT_SERVICE_URL') or 'http://localhost:8000'
 
      DLIB_LANDMARK_MODEL_PATH = None
 
