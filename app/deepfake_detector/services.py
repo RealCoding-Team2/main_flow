@@ -1,4 +1,3 @@
-
 import cv2
 import dlib
 import numpy as np
@@ -9,6 +8,8 @@ import os
 from flask import current_app
 # from app.llm_integration.gemini_client import call_gemini_api
 from app.llm_integration.llm import LLMRequester # <--- LLMRequester 클래스 임포트
+import requests
+from pathlib import Path
 
 # Dlib 객체 로드 및 캐싱 
 def get_dlib_objects_with_caching():
@@ -222,3 +223,198 @@ JSON의 각 필드 값은 분석에 기반한 구체적인 내용이어야 합�
     except Exception as e: # 그 외 API 호출 중 발생할 수 있는 예외
         current_app.logger.critical(f"LLM 판단 중 예외 발생: {e}", exc_info=True)
         return {"error": f"LLM 판단 중 오류 발생: {str(e)}"}, 500
+
+# fast-stt API 호출을 위한 함수
+def call_fast_stt_api(audio_file_path):
+    """
+    fast-stt 서비스에 음성 파일을 전송하여 STT 변환을 수행합니다.
+    
+    Args:
+        audio_file_path (str): 음성 파일의 경로
+        
+    Returns:
+        dict: STT 결과 또는 에러 정보
+    """
+    try:
+        # fast-stt 서비스 URL (환경변수에서 가져오거나 기본값 사용)
+        stt_service_url = os.getenv('FAST_STT_SERVICE_URL', 'http://localhost:8001')
+        stt_endpoint = f"{stt_service_url}/api/transcribe"
+        
+        current_app.logger.info(f"fast-stt 서비스 호출 시작: {stt_endpoint}")
+        
+        # 음성 파일을 multipart/form-data로 전송
+        with open(audio_file_path, 'rb') as audio_file:
+            files = {'audio': (Path(audio_file_path).name, audio_file, 'audio/mpeg')}
+            
+            # POST 요청으로 STT 서비스 호출
+            response = requests.post(
+                stt_endpoint,
+                files=files,
+                timeout=60  # 60초 타임아웃
+            )
+        
+        if response.status_code == 200:
+            stt_result = response.json()
+            current_app.logger.info("fast-stt 서비스 호출 성공")
+            return {
+                "success": True,
+                "transcription": stt_result.get("transcription", ""),
+                "language": stt_result.get("language", "ko"),
+                "confidence": stt_result.get("confidence", 0.0)
+            }
+        else:
+            current_app.logger.error(f"fast-stt 서비스 오류: {response.status_code} - {response.text}")
+            return {
+                "success": False,
+                "error": f"STT 서비스 오류 (HTTP {response.status_code}): {response.text}"
+            }
+            
+    except requests.exceptions.Timeout:
+        current_app.logger.error("fast-stt 서비스 타임아웃")
+        return {
+            "success": False,
+            "error": "STT 서비스 응답 시간 초과 (60초)"
+        }
+    except requests.exceptions.ConnectionError:
+        current_app.logger.error("fast-stt 서비스 연결 실패")
+        return {
+            "success": False,
+            "error": "STT 서비스에 연결할 수 없습니다. 서비스가 실행 중인지 확인하세요."
+        }
+    except Exception as e:
+        current_app.logger.error(f"fast-stt 서비스 호출 중 예외 발생: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"STT 서비스 호출 중 오류: {str(e)}"
+        }
+
+def analyze_text_for_voicephishing(text, situation=""):
+    """
+    텍스트 내용을 분석하여 보이스피싱 여부를 판단합니다.
+    
+    Args:
+        text (str): 분석할 텍스트
+        situation (str): 사용자가 제공한 상황 설명
+        
+    Returns:
+        dict: 보이스피싱 분석 결과
+    """
+    try:
+        llm_model_to_use = os.getenv("DEFAULT_MODEL") or "gpt-3.5-turbo"
+        llm_requester = LLMRequester(model=llm_model_to_use)
+        current_app.logger.info(f"보이스피싱 분석을 위한 LLM ({llm_model_to_use}) 객체 생성 완료.")
+    except ValueError as ve:
+        current_app.logger.error(f"LLMRequester 초기화 오류: {ve}")
+        return {
+            "voicephishing_probability": "판단 불가 (LLM API 키 설정 오류)",
+            "reasoning": f"내부 LLM 서비스 초기화 중 오류가 발생했습니다: {str(ve)}",
+            "recommendations_for_user": "관리자에게 문의하여 LLM 설정을 확인해주세요."
+        }
+    except Exception as e:
+        current_app.logger.error(f"LLM 초기화 중 예상치 못한 오류: {e}", exc_info=True)
+        return {
+            "voicephishing_probability": "판단 불가 (서버 오류)",
+            "reasoning": f"LLM 서비스 초기화 중 심각한 오류: {str(e)}",
+            "recommendations_for_user": "잠시 후 다시 시도해주세요."
+        }
+
+    system_prompt = """당신은 보이스피싱 탐지 전문가입니다.
+제공된 텍스트 내용을 분석하여 보이스피싱(전화금융사기)일 가능성을 평가해주세요.
+
+다음과 같은 보이스피싱 특징들을 고려하세요:
+1. 긴급성 강조 ("즉시", "지금 당장", "빨리")
+2. 금융 관련 용어 (계좌, 송금, 대출, 카드, 보험금)
+3. 신분 사칭 (경찰, 검찰, 은행원, 금융감독원)
+4. 개인정보 요구 (주민번호, 계좌번호, 비밀번호)
+5. 위협적 언어 ("체포", "압류", "수사", "법적 조치")
+6. 의심스러운 요구 (ATM 조작, 앱 설치, 화면 공유)
+
+응답은 반드시 다음 JSON 형식을 따라주세요:
+{
+  "voicephishing_probability": "string (매우 높음/높음/중간/낮음/매우 낮음 중 하나)",
+  "confidence_score": "float (0.0-1.0 사이의 신뢰도)",
+  "reasoning": "string (구체적인 판단 근거)",
+  "detected_patterns": ["보이스피싱으로 의심되는 패턴들"],
+  "risk_level": "string (고위험/중위험/저위험/안전 중 하나)",
+  "recommendations_for_user": "string (사용자를 위한 구체적인 조치 방안)"
+}"""
+
+    user_message = f"""
+[분석할 텍스트]
+{text}
+
+[상황 설명]
+{situation if situation else "제공되지 않음"}
+
+위 텍스트를 분석하여 보이스피싱 여부를 판단해주세요.
+"""
+
+    try:
+        llm_response = llm_requester.send_message(
+            message=user_message,
+            system_prompt=system_prompt
+        )
+        current_app.logger.debug(f"보이스피싱 분석 LLM 응답: {llm_response}")
+
+        # JSON 응답 파싱
+        if isinstance(llm_response, str):
+            analysis_result = json.loads(llm_response)
+        else:
+            analysis_result = llm_response
+            
+        current_app.logger.info("보이스피싱 분석 완료")
+        return analysis_result
+
+    except json.JSONDecodeError as je:
+        current_app.logger.error(f"LLM 응답 JSON 파싱 오류: {je}")
+        return {
+            "voicephishing_probability": "판단 불가 (응답 파싱 오류)",
+            "reasoning": "AI 응답을 처리하는 중 오류가 발생했습니다.",
+            "recommendations_for_user": "다시 시도해주시거나 관리자에게 문의해주세요."
+        }
+    except Exception as e:
+        current_app.logger.error(f"보이스피싱 분석 중 오류: {e}", exc_info=True)
+        return {
+            "voicephishing_probability": "판단 불가 (서버 오류)",
+            "reasoning": f"분석 중 오류가 발생했습니다: {str(e)}",
+            "recommendations_for_user": "잠시 후 다시 시도해주세요."
+        }
+
+def analyze_audio_for_voicephishing(audio_file_path, situation=""):
+    """
+    음성 파일을 STT로 변환하고 보이스피싱 여부를 분석합니다.
+    
+    Args:
+        audio_file_path (str): 분석할 음성 파일 경로
+        situation (str): 사용자가 제공한 상황 설명
+        
+    Returns:
+        tuple: (stt_result, voicephishing_analysis)
+    """
+    current_app.logger.info(f"음성 파일 보이스피싱 분석 시작: {audio_file_path}")
+    
+    # 1. STT 변환
+    stt_result = call_fast_stt_api(audio_file_path)
+    
+    if not stt_result.get("success", False):
+        current_app.logger.error("STT 변환 실패")
+        return stt_result, {
+            "voicephishing_probability": "판단 불가 (음성 변환 실패)",
+            "reasoning": stt_result.get("error", "음성을 텍스트로 변환할 수 없습니다."),
+            "recommendations_for_user": "음성 파일이 명확한지 확인하고 다시 시도해주세요."
+        }
+    
+    transcription = stt_result.get("transcription", "")
+    if not transcription.strip():
+        current_app.logger.warning("STT 결과가 비어있음")
+        return stt_result, {
+            "voicephishing_probability": "판단 불가 (음성 내용 없음)",
+            "reasoning": "음성에서 인식된 텍스트가 없습니다.",
+            "recommendations_for_user": "더 명확한 음성이 포함된 파일을 업로드해주세요."
+        }
+    
+    # 2. 텍스트 내용 보이스피싱 분석
+    voicephishing_analysis = analyze_text_for_voicephishing(transcription, situation)
+    
+    current_app.logger.info("음성 파일 보이스피싱 분석 완료")
+    return stt_result, voicephishing_analysis

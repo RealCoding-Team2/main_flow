@@ -12,6 +12,9 @@ class Config:
      SECRET_KEY     = os.environ.get('SECRET_KEY') or '개발용-임시-시크릿-키-입니다-반드시-변경하세요'
      OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
      DEFAULT_MODEL  = os.environ.get('DEFAULT_MODEL')
+     
+     # fast-stt 서비스 설정
+     FAST_STT_SERVICE_URL = os.environ.get('FAST_STT_SERVICE_URL') or 'http://localhost:8001'
 
      DLIB_LANDMARK_MODEL_PATH = None
 

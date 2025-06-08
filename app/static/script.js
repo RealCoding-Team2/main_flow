@@ -225,12 +225,93 @@ document.addEventListener('DOMContentLoaded', function() {
             addUserMessage(`음성 파일(${escapeHtml(file.name)})을 업로드했습니다.`);
             typingIndicator.classList.remove('hidden');
             scrollToBottom();
-            // TODO: 실제 음성 파일 분석 API 호출 로직 구현 필요
-            setTimeout(() => {
+            
+            // 실제 음성 파일 분석 API 호출
+            const formData = new FormData();
+            formData.append('audio', file); // 'audio'라는 키로 파일 추가
+
+            fetch('/api/deepfake/analyze_audio', { // 음성 분석 API 경로
+                method: 'POST',
+                body: formData,
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.error || `서버 분석 중 오류 발생 (${response.status})`);
+                    }).catch(() => {
+                        throw new Error(`서버 응답 오류 (${response.status})`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
                 typingIndicator.classList.add('hidden');
-                addAiMessage("음성 파일 분석 기능은 현재 개발 중입니다. 곧 만나보실 수 있습니다!");
-            }, 1500);
-            e.target.value = ''; // 파일 선택 초기화
+                console.log('음성 분석 서버 응답:', JSON.stringify(data, null, 2));
+
+                // STT 결과 표시
+                if (data.stt_result && data.stt_result.success) {
+                    const transcription = data.stt_result.transcription;
+                    const confidence = data.stt_result.confidence;
+                    
+                    let sttMessage = `**음성 변환 결과:**\n"${transcription}"\n`;
+                    if (confidence !== undefined) {
+                        sttMessage += `(변환 신뢰도: ${Math.round(confidence * 100)}%)\n\n`;
+                    }
+                    
+                    addAiMessage(sttMessage);
+                }
+
+                // 보이스피싱 분석 결과 표시
+                if (data.llm_judgment) {
+                    const probability = data.llm_judgment.voicephishing_probability || '알 수 없음';
+                    const reasoning = data.llm_judgment.reasoning || '제공되지 않음';
+                    const recommendations = data.llm_judgment.recommendations_for_user || '추가 조언 없음';
+                    const confidence = data.llm_judgment.confidence_score;
+                    const riskLevel = data.llm_judgment.risk_level;
+                    const detectedPatterns = data.llm_judgment.detected_patterns;
+
+                    let resultMessage = `**보이스피싱 분석 결과: ${probability}**\n`;
+                    if (riskLevel) {
+                        resultMessage += `**위험도:** ${riskLevel}\n`;
+                    }
+                    if (confidence !== undefined) {
+                        resultMessage += `**분석 신뢰도:** ${Math.round(confidence * 100)}%\n\n`;
+                    } else {
+                        resultMessage += `\n`;
+                    }
+                    
+                    resultMessage += `**분석 근거:**\n${reasoning}\n\n`;
+                    
+                    if (detectedPatterns && detectedPatterns.length > 0) {
+                        resultMessage += `**감지된 의심 패턴:**\n`;
+                        detectedPatterns.forEach(pattern => {
+                            resultMessage += `• ${pattern}\n`;
+                        });
+                        resultMessage += `\n`;
+                    }
+                    
+                    resultMessage += `**권장 조치:**\n${recommendations}`;
+
+                    // 위험도에 따라 알림 스타일 결정
+                    const isAlert = probability.includes("높음") || riskLevel === "고위험";
+                    addAiMessage(resultMessage.trim(), isAlert);
+
+                } else if (data.error) {
+                    addAiMessage(`분석 오류가 발생했습니다: ${data.error}`, true);
+                } else {
+                    addAiMessage("분석 결과를 받았으나, 예상치 못한 형식입니다. 관리자에게 문의해주세요.");
+                }
+            })
+            .catch(error => {
+                typingIndicator.classList.add('hidden');
+                console.error('음성 업로드 또는 분석 처리 Error:', error);
+                addAiMessage(`음성 파일 업로드 또는 분석 처리 중 오류가 발생했습니다: ${error.message}`, true);
+            })
+            .finally(() => {
+                typingIndicator.classList.add('hidden');
+                scrollToBottom();
+                e.target.value = ''; // 파일 선택 초기화 (같은 파일 다시 업로드 가능하도록)
+            });
         }
     });
 
