@@ -80,7 +80,13 @@ def build_summarized_prompt(recv, rag_data):
                     출처: {url}
                     요약: {summary}
                     """
-        print(prompt)
+        print(f"""
+                    [문서 {idx+1}]
+                    제목: {title}
+                    날짜: {date}
+                    출처: {url}
+                    요약: {summary}
+                    """)
 
     prompt += """
 위의 요약된 문서 정보를 참고하여, 사용자에게 친절하고 구체적으로 어떻게 대응하면 좋을지 조언해 주세요.
