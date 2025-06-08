@@ -1,4 +1,3 @@
-
 import cv2
 import dlib
 import numpy as np
@@ -7,10 +6,9 @@ import io
 import json
 import os
 from flask import current_app
-# from app.llm_integration.gemini_client import call_gemini_api
-from app.llm_integration.llm import LLMRequester # <--- LLMRequester 클래스 임포트
+from app.llm_integration.llm import LLMRequester
 
-# Dlib 객체 로드 및 캐싱 
+# Dlib 객체 로드 및 캐싱
 def get_dlib_objects_with_caching():
     if not hasattr(current_app, 'dlib_detector_instance') or \
        not hasattr(current_app, 'dlib_predictor_instance') or \
@@ -35,7 +33,7 @@ def get_dlib_objects_with_caching():
             return None, None
     return current_app.dlib_detector_instance, current_app.dlib_predictor_instance
 
-# 눈 깜빡임 분석 (이전과 동일)
+# 눈 깜빡임 분석
 def analyze_eye_blinking_from_landmarks(landmarks):
     if landmarks is None:
         return {"eye_blinking_status": "얼굴 랜드마크 데이터 없음"}
@@ -69,7 +67,7 @@ def analyze_eye_blinking_from_landmarks(landmarks):
         current_app.logger.error(f"눈 깜빡임 분석 중 오류 발생: {e}", exc_info=True)
         return {"eye_blinking_status": f"눈 깜빡임 분석 중 오류: {str(e)}"}
 
-# 얼굴 일관성 분석 
+# 얼굴 일관성 분석
 def analyze_facial_consistency_from_landmarks(landmarks):
     if landmarks is None:
         return {"facial_consistency_status": "얼굴 랜드마크 데이터 없음"}
@@ -95,7 +93,34 @@ def analyze_facial_consistency_from_landmarks(landmarks):
         current_app.logger.error(f"얼굴 일관성 분석 중 오류 발생: {e}", exc_info=True)
         return {"facial_consistency_status": f"얼굴 일관성 분석 중 오류: {str(e)}"}
 
-# 이미지 바이트(단일 프레임)로부터 딥페이크 관련 특징 추출 (이전과 동일)
+# --- ✨새로운 기능 함수✨ ---
+def _analyze_mouth_opening_from_landmarks(landmarks):
+    if landmarks is None:
+        return {"mouth_opening_status": "얼굴 랜드마크 데이터 없음"}
+    try:
+        # 입의 세로, 가로 길이를 계산하기 위한 랜드마크 인덱스 (dlib 68점 기준)
+        # 입술의 안쪽 경계를 사용 (60-67)
+        v_A = np.linalg.norm(np.array([landmarks.part(62).x, landmarks.part(62).y]) - np.array([landmarks.part(66).x, landmarks.part(66).y]))
+        h_B = np.linalg.norm(np.array([landmarks.part(60).x, landmarks.part(60).y]) - np.array([landmarks.part(64).x, landmarks.part(64).y]))
+
+        if h_B == 0: return {"mouth_aspect_ratio": 0.0, "mouth_opening_status": "입 너비 0, 계산 불가"}
+        
+        mar = v_A / h_B # Mouth Aspect Ratio 계산
+        
+        status = "입 다묾"
+        if mar > 0.5: status = "입 크게 벌림"
+        elif mar > 0.2: status = "입 약간 벌림"
+
+        return {
+            "mouth_aspect_ratio": round(float(mar), 4),
+            "mouth_opening_status": status
+        }
+    except Exception as e:
+        current_app.logger.error(f"입 움직임 분석 중 오류 발생: {e}", exc_info=True)
+        return {"mouth_opening_status": f"입 움직임 분석 중 오류: {str(e)}"}
+
+
+# 이미지 바이트(단일 프레임)로부터 딥페이크 관련 특징 추출
 def extract_single_frame_features(image_bytes):
     detector, predictor = get_dlib_objects_with_caching()
     if not detector or not predictor:
@@ -116,9 +141,13 @@ def extract_single_frame_features(image_bytes):
         return {"face_detected": False, "error": "프레임에서 얼굴을 감지할 수 없습니다."}, "얼굴 미검출"
 
     main_face_landmarks = predictor(gray_image, detected_faces[0])
+    
+    # 각 분석 함수 호출
     eye_blinking_features = analyze_eye_blinking_from_landmarks(main_face_landmarks)
     facial_consistency_features = analyze_facial_consistency_from_landmarks(main_face_landmarks)
+    mouth_opening_features = _analyze_mouth_opening_from_landmarks(main_face_landmarks) # ✨새로운 기능 호출✨
 
+    # 최종 데이터 구성
     face_rect = detected_faces[0]
     extracted_features_data = {
         "face_detected": True,
@@ -128,28 +157,28 @@ def extract_single_frame_features(image_bytes):
         },
         "eye_blinking_analysis": eye_blinking_features,
         "facial_consistency_analysis": facial_consistency_features,
+        "mouth_opening_analysis": mouth_opening_features, # ✨새로운 분석 결과 추가✨
     }
     current_app.logger.info("단일 프레임으로부터 특징 추출 성공.")
     return extracted_features_data, "특징 추출 성공"
 
-# 추출된 특징들(여러 프레임 또는 단일 이미지)과 사용자 상황 설명을 바탕으로 LLM에게 최종 판단 요청
+# LLM에게 최종 판단 요청 (변경 없음)
 def get_llm_deepfake_judgment(analysis_input_data, situation_description="", input_type="image"):
     try:
-        llm_model_to_use = os.getenv("DEFAULT_MODEL") or "gpt-3.5-turbo" # .env 또는 기본값
-        llm_requester = LLMRequester(model=llm_model_to_use) # 여기서 API 키 없으면 ValueError 발생
+        llm_model_to_use = os.getenv("DEFAULT_MODEL") or "gpt-3.5-turbo"
+        llm_requester = LLMRequester(model=llm_model_to_use)
         current_app.logger.info(f"OpenAI LLM ({llm_model_to_use}) 객체 생성 완료.")
-    except ValueError as ve: # LLMRequester가 API 키 없으면 ValueError 발생시킴
+    except ValueError as ve:
         current_app.logger.error(f"LLMRequester 초기화 오류 (아마도 API 키 부재): {ve}")
         return {
             "deepfake_probability": "판단 불가 (LLM API 키 설정 오류)",
             "reasoning": f"내부 LLM 서비스 초기화 중 오류가 발생했습니다: {str(ve)}",
             "recommendations_for_user": "관리자에게 문의하여 LLM 설정을 확인해주세요."
-        }, 500 # 서버 설정 오류이므로 500 반환 고려
-    except Exception as e_init: # 기타 초기화 오류
+        }, 500
+    except Exception as e_init:
         current_app.logger.error(f"LLMRequester 초기화 중 예상치 못한 오류: {e_init}", exc_info=True)
         return {"error": f"LLM 서비스 초기화 중 심각한 오류: {str(e_init)}"}, 500
     
-
     system_prompt_for_openai = """당신은 매우 정확하고 객관적인 딥페이크 탐지 AI 전문가입니다.
 제공된 시각적 특징 분석 데이터와 사용자 상황 설명을 바탕으로, 입력된 미디어가 딥페이크일 가능성을 평가해주세요.
 응답은 반드시 다음 명시된 JSON 형식만을 사용해야 하며, 다른 어떤 텍스트도 포함해서는 안 됩니다.
@@ -164,7 +193,6 @@ JSON의 각 필드 값은 분석에 기반한 구체적인 내용이어야 합�
   "recommendations_for_user": "string (사용자를 위한 구체적인 다음 단계 조언이나 주의사항)"
 }
 """
-    # 사용자 메시지 구성 
     input_type_description = "정지된 이미지" if input_type == "image" else "동영상"
     user_message_content = f"""
 [분석 대상 정보]
@@ -180,45 +208,32 @@ JSON의 각 필드 값은 분석에 기반한 구체적인 내용이어야 합�
 """
 
     try:
-        # yongs3님의 LLMRequester 클래스 인스턴스 생성
-        # .env 파일의 DEFAULT_MODEL 또는 기본 모델명(예: "gpt-3.5-turbo") 사용 가능
-        # API 키는 LLMRequester 내부에서 .env 통해 로드됨
         llm_model_to_use = os.getenv("DEFAULT_MODEL")
         llm_requester = LLMRequester(model=llm_model_to_use)
 
-        # LLMRequester의 send_message 메서드 호출
-        # 추가 파라미터 (temperature, max_tokens 등)는 LLMRequester의 기본값 또는 환경 변수 설정을 따르거나,
-        # 필요시 여기서 직접 **kwargs로 전달할 수 있습니다.
-        # 예: llm_requester.send_message(user_message_content, system_prompt=system_prompt_for_openai, temperature=0.5)
         llm_text_response = llm_requester.send_message(
             message=user_message_content,
             system_prompt=system_prompt_for_openai
         )
         current_app.logger.debug(f"OpenAI LLM 원시 응답: {llm_text_response}")
 
-        # LLM 응답이 JSON 문자열이라고 가정하고 파싱
-        # (만약 LLMRequester가 이미 딕셔너리를 반환한다면 json.loads는 필요 없음)
         try:
             parsed_llm_response = json.loads(llm_text_response)
-            # OpenAI 응답이 위에서 정의한 JSON 형식을 잘 따랐는지 간단히 확인 가능
             if not all(key in parsed_llm_response for key in ["deepfake_probability", "reasoning", "recommendations_for_user"]):
                 current_app.logger.warning(f"LLM 응답이 예상된 JSON 형식을 완전히 따르지 않음: {parsed_llm_response}")
-                # 필수 키가 없는 경우, 일부 기본값을 채워넣거나 오류로 처리할 수 있음
             return parsed_llm_response, 200
         except json.JSONDecodeError as e:
             current_app.logger.error(f"OpenAI LLM 응답 JSON 파싱 오류: {e} - 응답 내용: {llm_text_response}")
-            # LLM이 JSON 형식이 아닌 일반 텍스트로 답변했을 가능성
             return {"error": "LLM 응답 형식 오류 (JSON 파싱 실패)", "raw_response": llm_text_response}, 500
-        except TypeError as te: # 만약 llm_text_response가 이미 객체인데 json.loads 하려 할 경우
+        except TypeError as te:
              current_app.logger.error(f"OpenAI LLM 응답 타입 오류 (이미 객체일 수 있음): {te} - 응답: {llm_text_response}")
-             if isinstance(llm_text_response, dict): # 이미 딕셔너리라면 그대로 반환
+             if isinstance(llm_text_response, dict):
                  return llm_text_response, 200
              return {"error": "LLM 응답 타입 오류", "raw_response": str(llm_text_response)}, 500
 
-
-    except ValueError as ve: # LLMRequester 초기화 시 API 키 없음 등의 오류
+    except ValueError as ve:
         current_app.logger.error(f"LLMRequester 초기화 오류: {ve}")
         return {"error": f"LLM 서비스 설정 오류: {ve}"}, 500
-    except Exception as e: # 그 외 API 호출 중 발생할 수 있는 예외
+    except Exception as e:
         current_app.logger.critical(f"LLM 판단 중 예외 발생: {e}", exc_info=True)
         return {"error": f"LLM 판단 중 오류 발생: {str(e)}"}, 500
