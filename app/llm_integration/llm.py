@@ -168,4 +168,4 @@ if __name__ == "__main__":
     # 환경변수 설정 확인
     config = load_env_config()
         
-        simple_chat_example() 
+    simple_chat_example() 
