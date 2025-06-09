@@ -1,4 +1,3 @@
-
 from flask import request, jsonify, current_app
 from . import bp
 from .services import extract_single_frame_features, get_llm_deepfake_judgment
@@ -8,7 +7,7 @@ import tempfile # 임시 파일/폴더 생성을 위해
 import numpy as np # Numpy 배열 사용
 
 # 허용되는 파일 확장자 목록 (이전과 동일)
-allowed_extensions = {'png', 'jpg', 'jpeg', 'mp4', 'mov', 'avi', 'wmv'}
+allowed_extensions = {'png', 'jpg', 'jpeg', 'mp4', 'mov', 'avi', 'wmv', 'mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'}
 
 def check_file_extension(filename):
     return '.' in filename and \
@@ -151,3 +150,64 @@ def analyze_media_endpoint():
     except Exception as e:
         current_app.logger.critical(f"미디어 분석 API 처리 중 심각한 예외 발생: {e}", exc_info=True)
         return jsonify({"error": f"서버 내부 오류로 미디어 분석에 실패했습니다."}), 500
+
+@bp.route('/analyze_audio', methods=['POST'])
+def analyze_audio_endpoint():
+    """음성 파일 분석 엔드포인트"""
+    current_app.logger.info(f"음성 분석 요청 수신: {request.method} {request.path}")
+
+    if 'audio' not in request.files:
+        current_app.logger.warning("API 요청에 'audio' 파일 파트가 누락되었습니다.")
+        return jsonify({'error': "업로드된 파일('audio' key)이 없습니다."}), 400
+
+    uploaded_file = request.files['audio']
+    filename = uploaded_file.filename
+
+    if filename == '':
+        current_app.logger.warning("빈 파일 이름으로 파일 업로드가 시도되었습니다.")
+        return jsonify({"error": "업로드된 파일의 이름이 비어있습니다."}), 400
+
+    # 음성 파일 확장자 체크
+    file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+    audio_extensions = {'mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'}
+    
+    if file_ext not in audio_extensions:
+        current_app.logger.warning(f"허용되지 않는 음성 파일 형식 업로드 시도: {filename}")
+        return jsonify({"error": f"허용되지 않는 음성 파일 형식입니다. ({', '.join(audio_extensions)} 확장자만 가능)"}), 400
+
+    situation = request.form.get('situation', "")
+    
+    try:
+        current_app.logger.info(f"음성 파일 '{filename}' (크기: {uploaded_file.content_length}B) 분석 시작.")
+        
+        # 음성 파일을 임시 저장
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp_audio_file:
+            uploaded_file.save(tmp_audio_file.name)
+            audio_path = tmp_audio_file.name
+        
+        # STT 서비스 호출
+        from .services import analyze_audio_for_voicephishing
+        stt_result, llm_analysis = analyze_audio_for_voicephishing(audio_path, situation)
+        
+        # 임시 파일 삭제
+        os.remove(audio_path)
+        
+        current_app.logger.info("음성 파일 분석 완료.")
+        
+        final_response = {
+            "stt_result": stt_result,
+            "llm_judgment": llm_analysis,
+            "analyzed_input_type": "audio"
+        }
+        
+        return jsonify(final_response), 200
+
+    except Exception as e:
+        current_app.logger.critical(f"음성 분석 API 처리 중 심각한 예외 발생: {e}", exc_info=True)
+        # 임시 파일이 있다면 삭제
+        if 'audio_path' in locals():
+            try:
+                os.remove(audio_path)
+            except:
+                pass
+        return jsonify({"error": f"서버 내부 오류로 음성 분석에 실패했습니다."}), 500
