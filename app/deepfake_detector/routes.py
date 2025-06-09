@@ -1,153 +1,94 @@
 
 from flask import request, jsonify, current_app
 from . import bp
-from .services import extract_single_frame_features, get_llm_deepfake_judgment
-import cv2 # OpenCV 임포트
-import os # 파일 저장을 위해
-import tempfile # 임시 파일/폴더 생성을 위해
-import numpy as np # Numpy 배열 사용
+from .services import extract_single_frame_features, analyze_temporal_features, get_final_synthesized_response
+import cv2
+import os
+import tempfile
+import requests # RAG API 호출을 위해 requests 라이브러리 임포트
 
-# 허용되는 파일 확장자 목록 (이전과 동일)
 allowed_extensions = {'png', 'jpg', 'jpeg', 'mp4', 'mov', 'avi', 'wmv'}
 
 def check_file_extension(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in allowed_extensions
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
-@bp.route('/analyze_image', methods=['POST']) # 엔드포인트 이름은 유지 (이미지/동영상 모두 처리)
+@bp.route('/analyze_image', methods=['POST'])
 def analyze_media_endpoint():
-    current_app.logger.info(f"미디어 분석 요청 수신: {request.method} {request.path}")
-
-    if 'image' not in request.files: # 프론트엔드에서는 'image' 키로 파일 전송
-        current_app.logger.warning("API 요청에 'image' 파일 파트가 누락되었습니다.")
+    if 'image' not in request.files:
         return jsonify({'error': "업로드된 파일('image' key)이 없습니다."}), 400
 
     uploaded_file = request.files['image']
-    filename = uploaded_file.filename
-
-    if filename == '':
-        current_app.logger.warning("빈 파일 이름으로 파일 업로드가 시도되었습니다.")
-        return jsonify({"error": "업로드된 파일의 이름이 비어있습니다."}), 400
-
-    if not check_file_extension(filename):
-        current_app.logger.warning(f"허용되지 않는 파일 형식 업로드 시도: {filename}")
-        return jsonify({"error": f"허용되지 않는 파일 형식입니다. ({', '.join(allowed_extensions)} 확장자만 가능)"}), 400
+    if not uploaded_file.filename or not check_file_extension(uploaded_file.filename):
+        return jsonify({"error": "파일이 없거나 허용되지 않는 형식입니다."}), 400
 
     situation = request.form.get('situation', "")
-    file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-    
-    analysis_input_data = None
-    input_type = "image" # 기본값은 이미지
+    if not situation:
+        return jsonify({"error": "영상/이미지와 함께 반드시 상황 설명을 입력해야 합니다."}), 400
+
+    file_ext = uploaded_file.filename.rsplit('.', 1)[1].lower()
 
     try:
-        if file_ext in ['png', 'jpg', 'jpeg']: # 이미지 파일 처리
-            input_type = "image"
-            image_data_bytes = uploaded_file.read()
-            current_app.logger.info(f"이미지 파일 '{filename}' (크기: {len(image_data_bytes)}B) 분석 시작.")
-            analysis_input_data, feature_message = extract_single_frame_features(image_data_bytes)
-            current_app.logger.debug(f"이미지 특징 추출 결과 메시지: {feature_message}")
+        # 1. 딥페이크 기술 분석
+        deepfake_analysis_data = {}
+        input_type = "image"
+        feature_analysis_for_response = {}
 
-        elif file_ext in ['mp4', 'mov', 'avi', 'wmv']: # 동영상 파일 처리
+        if file_ext in ['png', 'jpg', 'jpeg']:
+            # 현재 로직은 동영상에 최적화 되어 있으므로, 정지 이미지는 간단히 처리
+            deepfake_analysis_data = {"deepfake_probability": "판단 어려움", "reasoning": "정지 이미지는 다른 분석 기준이 필요합니다."}
+        elif file_ext in ['mp4', 'mov', 'avi', 'wmv']:
             input_type = "video"
-            current_app.logger.info(f"동영상 파일 '{filename}' 분석 시작.")
-            
-            # 동영상 프레임 추출 및 분석 (예시: 처음 5초 동안 1초에 1프레임, 최대 5프레임)
             frame_analysis_results = []
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp_video_file:
-                uploaded_file.save(tmp_video_file.name)
-                video_path_for_cv2 = tmp_video_file.name
-            
-            current_app.logger.info(f"임시 동영상 파일 저장: {video_path_for_cv2}")
-
-            cap = cv2.VideoCapture(video_path_for_cv2)
+            # ... (이하 동영상 프레임 추출 및 분석 로직) ...
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp:
+                uploaded_file.save(tmp.name); video_path = tmp.name
+            cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
-                os.remove(video_path_for_cv2) # 임시 파일 삭제
-                current_app.logger.error(f"동영상 파일 '{filename}'을 열 수 없습니다.")
-                return jsonify({"error": "동영상 파일을 열 수 없습니다."}), 400
-
-            fps = cap.get(cv2.CAP_PROP_FPS) if cap.get(cv2.CAP_PROP_FPS) > 0 else 30 # 초당 프레임 수
-            max_frames_to_extract = 5 # 최대 추출 프레임 수
-            seconds_to_analyze = 5    # 분석할 동영상 앞부분 시간 (초)
-            frames_extracted_count = 0
+                os.remove(video_path); return jsonify({"error": "동영상 파일을 열 수 없습니다."}), 400
             
-            frame_interval = int(fps) # 1초당 1프레임 (fps 값에 따라 조절 가능)
-            current_frame_num = 0
-
-            while frames_extracted_count < max_frames_to_extract and \
-                  (current_frame_num / fps) < seconds_to_analyze :
-                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame_num)
-                success, frame_np = cap.read()
-                if not success:
-                    break # 프레임 읽기 실패 시 중단
-
-                is_success_encode, buffer = cv2.imencode(".jpg", frame_np)
-                if is_success_encode:
-                    frame_bytes = buffer.tobytes()
-                    features, msg = extract_single_frame_features(frame_bytes)
-                    if features: # 유효한 특징이 추출된 경우만 추가
-                        frame_analysis_results.append(features)
-                    current_app.logger.debug(f"동영상 프레임 {frames_extracted_count + 1} 분석: {msg}")
-                    frames_extracted_count += 1
-                
-                current_frame_num += frame_interval # 다음 분석할 프레임으로 이동
-
-            cap.release()
-            os.remove(video_path_for_cv2) # 임시 파일 삭제
-            current_app.logger.info(f"동영상 '{filename}'에서 {frames_extracted_count}개 프레임 분석 완료.")
-
-            if not frame_analysis_results: # 분석된 프레임이 하나도 없는 경우
-                current_app.logger.warning(f"동영상 '{filename}'에서 유효한 분석 결과를 얻지 못했습니다.")
-                # 얼굴 미검출과 유사한 응답 반환
-                return jsonify({
-                    "feature_analysis": {"face_detected": False, "error": "동영상에서 분석 가능한 얼굴을 찾지 못했습니다."},
-                    "llm_judgment": {
-                        "deepfake_probability": "판단 불가 (분석 가능한 얼굴 없음)",
-                        "reasoning": "동영상에서 분석 가능한 얼굴 정보를 충분히 추출하지 못했습니다.",
-                        "recommendations_for_user": "얼굴이 더 명확하게 나오는 다른 동영상이나 이미지를 사용해 주세요."
-                    }
-                }), 200
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30; total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)); max_frames_to_analyze = 30
+            for i in range(max_frames_to_analyze):
+                frame_id = int(i * (total_frames / max_frames_to_analyze));
+                if frame_id >= total_frames: break
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id); success, frame_np = cap.read()
+                if not success: break
+                _, buffer = cv2.imencode(".jpg", frame_np)
+                features, _ = extract_single_frame_features(buffer.tobytes())
+                if features.get("face_detected"): frame_analysis_results.append(features)
             
-            analysis_input_data = frame_analysis_results # 여러 프레임의 분석 결과를 리스트로 전달
-
-        else: # 로직상 여기까지 오면 안 되지만, 방어적으로
-            current_app.logger.error(f"처리할 수 없는 파일 확장자입니다: {file_ext}")
-            return jsonify({"error": "내부 서버 오류: 파일 타입 처리 실패"}), 500
-
-        # --- 공통 로직: 특징 추출 결과 및 LLM 판단 ---
-        if analysis_input_data is None or \
-           (isinstance(analysis_input_data, dict) and analysis_input_data.get("error")) or \
-           (isinstance(analysis_input_data, list) and not analysis_input_data) : # 리스트인데 비어있는 경우
-            error_msg = "분석 데이터 생성 실패"
-            if isinstance(analysis_input_data, dict) and analysis_input_data.get("error"):
-                error_msg = analysis_input_data.get("error")
-            current_app.logger.error(f"특징 추출/준비에 실패했습니다: {error_msg}")
-            return jsonify({"error": f"특징 추출/준비 실패: {error_msg}"}), 400
-
-        # 단일 이미지이고 얼굴 미검출 시 (동영상은 위에서 이미 처리)
-        if input_type == "image" and not analysis_input_data.get("face_detected", False):
-            current_app.logger.info("이미지에서 얼굴이 감지되지 않아 LLM 호출을 생략합니다.")
-            return jsonify({
-                "feature_analysis": analysis_input_data,
-                "llm_judgment": {
-                    "deepfake_probability": "판단 불가 (얼굴 미검출)",
-                    "reasoning": "제공된 이미지에서 얼굴을 감지할 수 없어 딥페이크 분석을 수행할 수 없습니다.",
-                    "recommendations_for_user": "얼굴이 선명하게 나온 다른 이미지를 사용해 주세요."
-                }
-            }), 200
+            cap.release(); os.remove(video_path)
+            if len(frame_analysis_results) < 5: return jsonify({"error": "동영상에서 분석할 프레임이 부족합니다."}), 400
+            
+            # 시간적 특징 계산
+            temporal_features = analyze_temporal_features(frame_analysis_results)
+            # 딥페이크 판단은 이제 LLM에게 모든 데이터를 주고 맡김
+            deepfake_analysis_data = {"temporal_analysis": temporal_features}
+            feature_analysis_for_response = {"bounding_box": frame_analysis_results[0].get("bounding_box")}
         
-        llm_judgment_data, llm_status_code = get_llm_deepfake_judgment(analysis_input_data, situation, input_type)
-        current_app.logger.info(f"LLM 판단 서비스 완료 (HTTP 상태 코드: {llm_status_code}).")
+        # 2. RAG 시스템에 내부 API 요청
+        rag_search_results = {"results": []} # 기본값
+        try:
+            rag_api_url = "http://localhost:8000/search"
+            rag_response = requests.post(rag_api_url, json={"query": situation, "top_k": 3})
+            rag_response.raise_for_status()
+            rag_search_results = rag_response.json()
+        except requests.exceptions.RequestException as e:
+            current_app.logger.warning(f"RAG API 호출 실패: {e}")
+            rag_search_results = {"error": "유사 사례 검색에 실패했습니다.", "details": str(e)}
 
-        final_api_response = {
-            # 동영상 분석 시 analysis_input_data는 프레임별 결과 리스트가 될 수 있음.
-            # 프론트엔드에서 이를 어떻게 보여줄지 고려 필요. 여기서는 그대로 전달.
-            "feature_analysis_summary" if input_type == "video" else "feature_analysis": analysis_input_data,
-            "llm_judgment": llm_judgment_data,
+        # 3. 두 결과를 합쳐 최종 답변 생성
+        final_response_data, final_status_code = get_final_synthesized_response(
+            deepfake_analysis_data=deepfake_analysis_data,
+            rag_search_results=rag_search_results,
+            user_situation=situation
+        )
+        
+        return jsonify({
+            "feature_analysis": feature_analysis_for_response,
+            "llm_judgment": final_response_data,
             "analyzed_input_type": input_type
-        }
-        return jsonify(final_api_response), llm_status_code
+        }), final_status_code
 
     except Exception as e:
         current_app.logger.critical(f"미디어 분석 API 처리 중 심각한 예외 발생: {e}", exc_info=True)
-        return jsonify({"error": f"서버 내부 오류로 미디어 분석에 실패했습니다."}), 500
+        return jsonify({"error": f"서버 내부 오류가 발생했습니다."}), 500
